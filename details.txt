@@ -1,0 +1,175 @@
+Part 2: The Demonstration Steps
+
+Follow this script to perform a "Crushing" demo for your opponent or faculty.
+
+Preparation
+
+1.  Open MySQL Workbench and show the accounts table.
+    -   Say: "Notice Alice and Bob both have $1000. No transactions are logged yet."
+2.  Open VS Code and show your Main.java.
+    -   Say: "I have set the Pool Size to 2, but I am launching 6 concurrent users. This is to test how the system behaves under pressure."
+
+Phase 1: The "Happy Path" (Concurrency & Reuse)
+
+1.  Run the project.
+2.  Point to the logs immediately:
+    -   "Look at the console. Users 1 and 2 grabbed the only 2 available connections. Users 3 through 6 are now in a 'WAITING' state."
+3.  Wait for the 3-second simulation to finish:
+    -   "Notice that as soon as User 1 finished, the pool automatically handed the connection to User 3. This is the BlockingQueue in action—fair and thread-safe resource distribution."
+4.  Check the Stats:
+    -   "See the Pool Monitor? The 'Active' count never went above 2. My infrastructure protected the database from a connection spike."
+
+Phase 2: The "ACID" Test (Transaction Rollback)
+
+1.  Modify your code or use a thread to try and transfer $5000.
+2.  Run it.
+3.  Point to the Error Log:
+    -   "The system threw an InsufficientFundsException. Now, look at the Database."
+4.  Refresh MySQL:
+    -   "Even though the code started the process, Alice still has her original balance. Because I used conn.rollback(), the database is perfectly consistent. It was 'All or Nothing'."
+
+Phase 3: The "Deep Dive" (Answering Questions)
+
+-   If they ask: "What makes this better than a CRUD app?"
+    -   Answer: "A CRUD app just sends data. This project manages resources and concurrency. It handles the connection lifecycle, prevents memory leaks, and ensures thread safety using Atomic integers and blocking structures."
+-   If they ask: "How do you avoid connection leaks?"
+    -   Answer: "By using a finally block in the Service layer. Whether a transaction succeeds or fails, pool.releaseConnection(conn) is always called. This guarantees the connection returns to the warehouse."
+
+Phase 4: Conclusion
+
+-   End with: "This project demonstrates that I can build production-ready infrastructure. I didn't just use a framework; I built the engine myself to understand performance tradeoffs, locking, and data integrity."
+
+---
+
+Final Check:
+
+-   Your Main.java is the "Stress Tester."
+-   Your BankingService.java has the Thread.sleep(3000) to slow things down for the demo.
+-   Your CustomConnectionPool.java has the printDetailedStatus() method.
+
+You are now 100% ready to demonstrate. Good luck!
+
+If they ask, "What was the hardest part?"
+"The hardest part was ensuring that connections were never leaked. I had to ensure that regardless of a business failure (insufficient funds) or a system failure (database timeout), the connection was always returned to the pool using a finally block, while also resetting the autoCommit state for the next user." 
+
+
+
+Since you chose Option 1, you are positioning yourself as an
+Infrastructure-aware Backend Developer. This is a strong stance. Interviewers
+will test your depth in Java Concurrency, JDBC Internals, and Architectural
+Design.
+
+Here are the most likely interview questions and the "Senior-level" answers you
+should provide.
+
+1. The Core Infrastructure (Connection Pool)
+
+Q: Why build a custom pool instead of just opening a new connection every time?
+
+  - Answer: "Opening a database connection involves a TCP handshake,
+    authentication, and process initialization on the MySQL side, which is very
+    'expensive' in terms of latency. By using a pool, we keep connections
+    'warm.' This reduces request latency and prevents the database from crashing
+    due to too many simultaneous connection attempts (socket exhaustion)."
+
+Q: Why did you choose LinkedBlockingQueue for the pool?
+
+  - Answer: "Thread safety and blocking behavior. BlockingQueue.take() is
+    perfect here because if the pool is empty, it automatically puts the calling
+    thread into a 'waiting' state until another thread returns a connection. It
+    handles all the complex wait/notify logic internally, making the code
+    cleaner and less prone to deadlocks."
+
+Q: How did you handle "Connection Leaks" in your project?
+
+  - Answer: "A connection leak happens if a borrowed connection is never
+    returned to the pool. I prevented this by using a try-catch-finally block in
+    the Service layer. I ensured that pool.releaseConnection(conn) is always
+    called in the finally block, regardless of whether the transaction succeeded
+    or failed."
+
+2. Java Concurrency & Multithreading
+
+Q: You used AtomicInteger for metrics. Why not just a normal int with
+synchronized?
+
+  - Answer: "AtomicInteger uses CAS (Compare-And-Swap) instructions at the CPU
+    level. It is 'non-blocking' and much faster than synchronized or Locks for
+    simple counters because it doesn't require putting threads to sleep and
+    waking them up (context switching)."
+
+Q: What would happen if 100 threads hit your pool of size 5?
+
+  - Answer: "The first 5 threads would acquire connections and begin their work.
+    The remaining 95 threads would be parked in the BlockingQueue's waiting
+    area. As each thread finishes and releases its connection, the next thread
+    in the queue is woken up. This acts as a throttle (Backpressure), ensuring
+    the system remains stable under load."
+
+3. Database & Transaction Integrity (ACID)
+
+Q: How did you guarantee Atomicity in the money transfer?
+
+  - Answer: "I manually disabled setAutoCommit(false). This creates a
+    transaction boundary. I then perform the debit, credit, and logging. If all
+    succeed, I call commit(). If any exception occurs (like a network glitch or
+    a SQL constraint violation), I call rollback(). This ensures the database
+    never reflects a partial transfer."
+
+Q: What is the significance of calling setAutoCommit(true) before returning the
+connection to the pool?
+
+  - Answer: "This is a safety best practice. Most JDBC operations expect
+    auto-commit to be 'on.' If we return a connection with auto-commit 'off' and
+    the next user doesn't know that, their changes might never be saved to the
+    database. We always reset the connection state to its 'default' before
+    releasing it."
+
+4. Architectural Design
+
+Q: Why separate the Repository and the Service layers?
+
+  - Answer: "Separation of Concerns. The Repository is only responsible for SQL
+    syntax and mapping. The Service layer is responsible for 'Business Logic'
+    and 'Transaction Boundaries.' This makes the code testable—I could
+    theoretically swap MySQL for another DB by changing the Repository without
+    ever touching the Banking Logic in the Service layer."
+
+Q: Why use a ConnectionPool Interface?
+
+  - Answer: "It follows the Dependency Inversion Principle. By coding to an
+    interface, the BankingService doesn't need to know how the pool works—it
+    just needs a getConnection() method. This allows us to swap my
+    CustomConnectionPool for a production-grade one like HikariCP in the future
+    with zero changes to the business logic."
+
+5. The "Tough" Questions (Trade-offs)
+
+Q: Your pool doesn't check if a connection is 'stale' or 'dead' before giving it
+to a user. How would you fix that?
+
+  - Answer: "In a production version, I would implement a 'Validation Query.'
+    Before handing out a connection, I'd run a cheap SQL command like SELECT 1.
+    If it fails, I'd discard that connection and create a new one. This prevents
+    'Broken Pipe' errors if the DB was restarted or the connection timed out."
+
+Q: Why not use Spring Data JPA or Hibernate?
+
+  - Answer: "Frameworks like Spring hide the underlying mechanics. I chose raw
+    JDBC for this project specifically to demonstrate my ability to manage the
+    lifecycle of resources and the mechanics of transactions. It shows I
+    understand what the frameworks are doing under the hood, which is essential
+    for troubleshooting performance issues."
+
+3 Tips for the Interview:
+
+1.  Don't say "I don't know": If asked about something you didn't implement
+    (like connection timeouts), say: "In this version, I focused on the core
+    pooling logic, but in a production environment, I would add [X feature] to
+    handle [Y problem]."
+2.  Use the word "Bounded": Always refer to your pool as a "Bounded Resource."
+    It sounds professional.
+3.  Mention "Contention": When talking about multiple threads, mention that the
+    pool manages "Connection Contention." It shows you understand the
+    competition for limited resources.
+    
